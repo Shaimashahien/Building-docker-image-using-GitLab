@@ -1,0 +1,48 @@
+# The names and order of the pipeline stages
+# create variables [username , password] in GitLab, those variables are your credentials of DockerHub
+stages:
+  - build
+  - publish
+  - deploy
+variables:
+  TAG_LATEST: $username/mynginx:latest
+  TAG_COMMIT: $username/mynginx:$CI_COMMIT_SHORT_SHA
+build:
+  image: docker:latest
+  stage: build
+  services:
+    - docker:dind
+  script:
+    - docker build -t "$TAG_COMMIT" .
+    - docker build -t "$TAG_LATEST" .
+    - docker save $TAG_LATEST > latest-image.tar
+  artifacts:
+    paths:
+      - latest-image.tar
+  only:
+    - main
+publish:
+  image: docker:latest
+  stage: publish
+  services:
+    - docker:dind
+  script:
+    - docker load -i latest-image.tar
+    - docker image ls
+    - docker login -u=$username -p=$password
+    - docker push $TAG_LATEST
+deploy:
+  image: alpine:latest
+  stage: deploy
+  script:
+    - chmod 600 $ID_RSA
+    - apk update && apk add openssh-client
+    # ensure that you created the following variables [SERVER_USER , SERVER_IP] of your current machine so it can access therough ssh the alpine node
+    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "docker login -u=$username -p=$password"
+    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "docker pull $TAG_LATEST"
+    # delete any container named my-app-dina to prevent conflict occurence 
+    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "docker container rm -f my-app-dina || true"
+    - ssh -i $ID_RSA -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_IP "docker run -d -p 88:80 --name my-app-dina $TAG_LATEST"
+  only:
+    - main
+  when: manual
